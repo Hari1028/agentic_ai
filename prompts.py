@@ -152,126 +152,79 @@ def get_dynamic_rules_prompt(
         logging.error(f"Error formatting DYNAMIC_RULES_PROMPT: {e}")
         return "ERROR: Could not format dynamic rules prompt."
 
-
 # ==============================================================
-# 3️⃣ FINAL REPORT PROMPT
+# 3️⃣ FINAL ANALYSIS PROMPT (NEW & CHEAP)
 # ==============================================================
 
-FINAL_REPORT_PROMPT = """
-You are an expert Data Validation Analyst. Your task is to consolidate all validation findings into a single, comprehensive JSON report, including severity levels, a summary block, and schema drift analysis.
+ANALYSIS_PROMPT = """
+You are the Principal Data Steward. You will be given a *summary* of data validation findings and the initial schema analysis.
+Your job is to generate ONLY the high-level analysis, scoring, and planning sections, following your core instructions.
 
-You will be given:
-1.  File Metadata
-2.  Schema Analysis (vs DB)
-3.  Type Mismatches (with severity added by you)
-4.  Data Quality Violations (found by script)
-5.  Current File Schema
-6.  Historical Schemas (optional, may be empty)
-7.  Dynamic Validation Rules (Pre-generated)
-
-Your Job:
-1.  **Consolidate**: Combine all inputs.
-2.  **Analyze & Add Severity/Summary**:
-    * Assign/confirm `"severity": "high" | "medium" | "low"` for each 'Type Mismatch' and 'Data Quality Violation'.
-    * **Add Business Impact**: For each 'Data Quality Violation', add a new field called `"business_impact"`.
-    * **Add Fix-it Logic**: For *each* issue, add `"suggested_fix_logic"` and `"root_cause_hypothesis"`.
-    * **Generate Validation Summary**.
-    * **Generate Data Quality Score**.
-    * **Suggest Append/Upsert Strategy**.
-    * **Perform Schema Drift Analysis**.
-    * **Generate Narrative Summary**.
-
----
 [INPUT DATA]
-... (schemas, mismatches, rules, etc.) ...
 
-**[NEW] Dynamic Validation Rules (Pre-generated):**
-{dynamic_rules_json}
+**1. Schema Analysis (What vs. What):**
+{schema_analysis_json}
+
+**2. Violation Summaries (The Problems):**
+{violations_summary_json}
+
+**3. Historical Schemas (For Drift Analysis):**
+{historical_schemas_json}
 
 ---
 [YOUR ANALYSIS]
 
-Produce a single JSON report in this exact format:
+Based *only* on the input data, generate a single JSON object with the following keys.
+Be specific, authoritative, and link your analysis directly to the data.
+
 {{
-  "file_name": "{file_name}",
-  "total_rows_checked": {total_rows},
-  "validated_at": "{validation_timestamp}",
   "validation_summary": {{
     "status": "[Passed | Passed with Warnings | Failed]",
-    "high_severity_issues": <count>,
-    "medium_severity_issues": <count>,
-    "low_severity_issues": <count>
+    "high_severity_issues": <count of high severity issues>,
+    "medium_severity_issues": <count of medium severity issues>,
+    "low_severity_issues": <count of low severity issues>
   }},
   "data_quality_score": {{
     "score": <0-100>,
     "grade": "[A | B | C | D | F]",
-    "reasoning": "Explain reasoning"
+    "reasoning": "Provide a data-driven explanation for the score. **Link the specific high-severity violations (e.g., 'null OrderIDs') to their business impact and the resulting score.**"
   }},
   "triage_plan": [
-    {{
-      "priority": 1,
-      "action": "Fix null OrderID values",
-      "reasoning": "Top priority as it blocks processing"
-    }}
+     {{ "priority": 1, "action": "First, most critical action.", "reasoning": "Why this is P1 (e.g., 'Blocks all data loading')." }},
+     {{ "priority": 2, "action": "Second, most critical action.", "reasoning": "Why this is P2 (e.g., 'Corrupts financial data')." }},
+     {{ "priority": 3, "action": "Third, most critical action.", "reasoning": "Why this is P3 (e.g., 'Causes user-facing errors')." }}
   ],
-  "data_type_mismatch": [],
-  "data_quality_issues": [],
-  "append_upsert_suggestion": {{}},
-  "schema_drift": {{}},
-  "dynamic_validation_rules": {dynamic_rules_json},
-  "root_cause_analysis": {{}},
-  "overall_analysis": {{}}
+  "append_upsert_suggestion": {{
+    "strategy": "[Append | Upsert | Do Not Load]",
+    "key_column": "[ColumnName | null]",
+    "reasoning": "Explain the strategy. **If 'Upsert', state the key. If 'Do Not Load', explain why it's unsafe.**"
+  }},
+  "schema_drift": {{
+    "detected": <true | false>,
+    "analysis": "Analyze the historical schemas. **If drift is detected, describe the *specific change* (e.g., 'Column 'Email' was added', 'Column 'Price' changed from INT to STRING').**"
+  }},
+  "root_cause_analysis": {{
+    "hypothesis": "Provide a *specific, data-driven hypothesis* for the root cause. **Connect the error patterns (e.g., 'null OrderIDs' + 'string-based 'qty'') to a likely real-world source** (e.g., 'This pattern suggests a manual data entry error from a spreadsheet, not an API bug')."
+  }},
+  "overall_analysis": {{
+    "narrative_summary": "Write a 2-sentence summary for a non-technical manager. **State the data's *fitness for use* (e.g., 'Data is NOT safe for production') and the **single biggest business risk** (e.g., 'Risk of data corruption in the Orders table')."
+  }}
 }}
 """
-
-def get_final_report_prompt(
-    file_metadata: Dict[str, Any],
+def get_analysis_prompt(
     schema_analysis: Dict[str, Any],
-    type_mismatches: List[Dict[str, Any]],
-    dq_violations: List[Dict[str, Any]],
-    current_file_schema: Dict[str, Any],
-    historical_schemas: List[Dict[str, Any]],
-    dynamic_rules: List[Dict[str, Any]]
+    violations_summary: Dict[str, Any],
+    historical_schemas: List[Dict[str, Any]] # We still need this for drift
 ) -> str:
-    """Helper function to format the final report prompt including schema drift."""
-
-    current_file_schema_cols = current_file_schema.get('columns', {})
-    validation_ts = datetime.now(timezone.utc).isoformat()
-
+    """Helper function to format the new, cheaper analysis prompt."""
     try:
-        dq_violations_json_str = json.dumps(dq_violations, indent=2, default=str)
-    except Exception as e:
-        logging.warning(f"Could not serialize dq_violations: {e}")
-        dq_violations_json_str = "[]"
-
-    try:
-        type_mismatches_json_str = json.dumps(type_mismatches, indent=2, default=str)
-    except Exception as e:
-        logging.warning(f"Could not serialize type_mismatches: {e}")
-        type_mismatches_json_str = "[]"
-
-    try:
-        dynamic_rules_json_str = json.dumps(dynamic_rules, default=str)
-    except Exception as e:
-        logging.warning(f"Could not serialize dynamic_rules: {e}")
-        dynamic_rules_json_str = "[]"
-
-    try:
-        return FINAL_REPORT_PROMPT.format(
-            file_metadata_json=json.dumps(file_metadata, indent=2, default=str),
+        return ANALYSIS_PROMPT.format(
             schema_analysis_json=json.dumps(schema_analysis, indent=2, default=str),
-            type_mismatches_json=type_mismatches_json_str,
-            dq_violations_json=dq_violations_json_str,
-            current_file_schema_json=json.dumps(current_file_schema_cols, indent=2, default=str),
-            historical_schemas_json=json.dumps(historical_schemas, indent=2, default=str),
-            file_name=file_metadata.get("file_name", "unknown_file"),
-            total_rows=file_metadata.get("total_rows", 0),
-            validation_timestamp=validation_ts,
-            dynamic_rules_json=dynamic_rules_json_str
+            violations_summary_json=json.dumps(violations_summary, indent=2, default=str),
+            # Note: We pass historical schemas in the prompt, but it's small.
+            # The LLM's job is to analyze it, not just see it.
+            historical_schemas_json=json.dumps(historical_schemas, indent=2, default=str)
         )
-    except KeyError as e:
-        logging.error(f"Missing key in FINAL_REPORT_PROMPT: {e}")
-        return "ERROR: Prompt formatting failed."
     except Exception as e:
-        logging.error(f"Error formatting FINAL_REPORT_PROMPT: {e}")
-        return "ERROR: Could not format final report prompt."
+        logging.error(f"Error formatting ANALYSIS_PROMPT: {e}")
+        return "ERROR: Could not format analysis prompt."
