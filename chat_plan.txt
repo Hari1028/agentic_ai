@@ -1,0 +1,114 @@
+Got you.
+You already have:
+
+Schema Analysis Agent (your agent)
+
+Your friend is building a Data Profiling Agent
+
+Now you want a Chat Flow (Conversation Orchestration) so that when both agents are connected using Autogen, the messages will flow correctly.
+
+Below is the clean, ready-to-implement chat flow for your agent (Schema Validation Agent).
+
+🔁 High-Level Multi-Agent Chat Flow
+User → Orchestrator → Schema Analysis Agent → Data Profiling Agent → Orchestrator → User
+
+🧩 Roles
+Agent	Role	Responsibilities
+Schema Analysis Agent (Your Agent)	Validate schema & structure	Compare with DB schema, detect missing/extra columns, infer column mappings
+Data Profiling Agent (Friend's Agent)	Analyze data patterns	Infer types, ranges, enums, duplicates, anomalies
+Orchestrator (Autogen Controller)	Controls conversation flow	Decides when to call which agent and merges results
+🎯 State Machine Flow (Exact Logic)
+START
+ ↓
+Receive User File + Optional Target Table Name
+ ↓
+IF user specifies a target table:
+     Use that
+ELSE:
+     Infer target table using heuristics (naming similarity, metadata)
+ ↓
+Send file + target schema → Schema Analysis Agent
+ ↓
+Schema Analysis Agent outputs:
+     - Missing columns
+     - Extra columns
+     - Suggested mappings
+     - JSON structured schema_mismatch
+ ↓
+Send same file → Data Profiling Agent
+ ↓
+Data Profiling Agent outputs:
+     - Data rules (format, enum, range)
+     - Type mismatches
+     - Statistical profile
+ ↓
+Orchestrator merges both outputs
+ ↓
+Generate Final Report JSON with:
+     - schema_mismatch
+     - type mismatches
+     - quality issues
+     - dynamic validation rules
+     - severity ranking
+ ↓
+Return final JSON to user
+END
+
+🧠 Prompting Flow Diagram (Very Important for Autogen)
+User Input File + Target Table (optional)
+        |
+        |--- Schema Analysis Agent
+        |        Input: DB schema + inferred file schema
+        |        Output: Column mappings + mismatch report JSON
+        |
+        |--- Data Profiling Agent
+                 Input: File contents only
+                 Output: Suggested validation rules JSON
+
+Orchestrator Merges → Final JSON → User
+
+✅ Example Autogen Setup Code (Copy-Paste)
+from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
+
+schema_agent = AssistantAgent(
+    name="schema_analysis_agent",
+    system_message="You are the Schema Validation Agent. Your job is to detect schema mismatches."
+)
+
+profiling_agent = AssistantAgent(
+    name="data_profiling_agent",
+    system_message="You are the Data Profiling Agent. Your job is to infer data rules & distributions."
+)
+
+user = UserProxyAgent(name="user")
+
+groupchat = GroupChat(agents=[user, schema_agent, profiling_agent], messages=[])
+
+manager = GroupChatManager(groupchat=groupchat)
+
+🗣️ Conversation Flow Script (How Agents Speak)
+manager.run(
+"""
+Here is the uploaded file and (optional) target table name.
+Perform schema analysis first.
+Then perform data profiling.
+Then produce a final consistent JSON output.
+"""
+)
+
+🎁 Output Format Reminder (What Your Agent Must Return)
+{
+  "schema_mismatch": { ... },
+  "data_type_mismatch": [ ... ],
+  "data_quality_issues": [ ... ],
+  "dynamic_validation_rules": [ ... ],
+  "overall_analysis": "..."
+}
+
+💡 If you'd like, I can now generate:
+
+✅ The Autogen YAML workflow
+✅ The UI conversation script
+✅ Or the API endpoint orchestration
+
+Just tell me:
