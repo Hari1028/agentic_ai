@@ -1,0 +1,240 @@
+{
+  "User_file_name": "new_orders.csv",
+  "Processed_at": "2025-11-02T19:06:17.371083+00:00",
+  "user_provided_target_table": null,
+  "inferred_target_table": "customer_orders",
+  "schema_mismatch": {
+    "target_table": "customer_orders",
+    "source_file": "new_orders.csv",
+    "columns_missing_from_file": [
+      "DiscountCode"
+    ],
+    "columns_extra_in_file": [
+      "ShippingMethod",
+      "CustomerEmail"
+    ],
+    "naming_mismatches": {
+      "cust": "CustomerID",
+      "qty": "Quantity"
+    },
+    "analysis": {
+      "context": "File is missing the 'DiscountCode' column, has extra columns 'ShippingMethod' and 'CustomerEmail', and two columns ('cust' and 'qty') are semantically mapped to 'CustomerID' and 'Quantity'.",
+      "reasoning": "Missing 'DiscountCode' may lead to incomplete discount data, affecting promotional analysis. Extra 'ShippingMethod' and 'CustomerEmail' are not part of the target schema, potentially causing data inconsistency. The semantic mappings indicate the source file's column names differ from the target schema, which could cause loading errors if not handled.",
+      "recommendation": [
+        "Map 'cust' to 'CustomerID' and 'qty' to 'Quantity' to align with the target schema.",
+        "Add 'DiscountCode' to the source file or set a default value if missing.",
+        "Evaluate whether 'ShippingMethod' and 'CustomerEmail' are necessary; if so, consider adding corresponding columns to the target schema or exclude them from import.",
+        "Implement validation rules to check data types and nullability constraints for 'OrderID', 'CustomerID', 'OrderDate', 'Quantity', and 'Price'."
+      ]
+    }
+  },
+  "file_name": "new_orders.csv",
+  "total_rows_checked": 5,
+  "validated_at": "2025-11-02T19:06:04.685472+00:00",
+  "validation_summary": {
+    "status": "Failed",
+    "high_severity_issues": 2,
+    "medium_severity_issues": 3,
+    "low_severity_issues": 1
+  },
+  "data_quality_score": {
+    "score": 55,
+    "grade": "D",
+    "reasoning": "Multiple critical issues such as null OrderID and invalid email formats significantly impact data integrity and downstream processing. Additional format and range violations further reduce data reliability."
+  },
+  "triage_plan": [
+    {
+      "priority": 1,
+      "action": "Resolve null OrderID values",
+      "reasoning": "OrderID is a primary key; null values block record identification and processing."
+    },
+    {
+      "priority": 2,
+      "action": "Correct invalid email formats",
+      "reasoning": "Invalid emails can cause communication failures and data inconsistency."
+    },
+    {
+      "priority": 3,
+      "action": "Validate and correct OrderDate formats",
+      "reasoning": "Ensuring date consistency is critical for time-based analyses."
+    },
+    {
+      "priority": 4,
+      "action": "Review and adjust Price and qty ranges",
+      "reasoning": "Out-of-range values can distort business metrics."
+    },
+    {
+      "priority": 5,
+      "action": "Standardize ShippingMethod categories",
+      "reasoning": "Categorical consistency improves reporting accuracy."
+    }
+  ],
+  "data_type_mismatch": [
+    {
+      "column": "Price",
+      "expected_type": "float",
+      "actual_type": "string",
+      "severity": "medium",
+      "root_cause_hypothesis": "Data entry or import process may treat numeric fields as strings, leading to type inconsistencies.",
+      "suggested_fix_logic": "Convert 'Price' values to float during data ingestion; if conversion fails, flag for review."
+    },
+    {
+      "column": "qty",
+      "expected_type": "integer",
+      "actual_type": "string",
+      "severity": "medium",
+      "root_cause_hypothesis": "Numeric fields stored as strings due to improper data parsing or formatting issues.",
+      "suggested_fix_logic": "Cast 'qty' to integer type; validate that all values are numeric before conversion."
+    }
+  ],
+  "data_quality_issues": [
+    {
+      "column": "OrderID",
+      "issue": "Null values present",
+      "severity": "high",
+      "business_impact": "Null OrderID prevents unique identification of orders, risking data loss and processing errors.",
+      "suggested_fix_logic": "Identify and fill missing OrderID values, or remove incomplete records."
+    },
+    {
+      "column": "CustomerEmail",
+      "issue": "Invalid email formats",
+      "severity": "high",
+      "business_impact": "Invalid emails hinder communication and may cause delivery failures or data integrity issues.",
+      "suggested_fix_logic": "Validate email formats; correct or remove invalid entries."
+    },
+    {
+      "column": "OrderDate",
+      "issue": "Incorrect date format",
+      "severity": "medium",
+      "business_impact": "Inconsistent date formats impair time-based analysis and reporting.",
+      "suggested_fix_logic": "Standardize date format to 'YYYY-MM-DD' using date parsing functions."
+    },
+    {
+      "column": "Price",
+      "issue": "Negative or zero values",
+      "severity": "medium",
+      "business_impact": "Invalid price values distort revenue calculations and financial reports.",
+      "suggested_fix_logic": "Filter out or correct non-positive Price entries."
+    },
+    {
+      "column": "ShippingMethod",
+      "issue": "Unrecognized categories",
+      "severity": "low",
+      "business_impact": "Unstandardized categories reduce reporting accuracy and category-based analysis.",
+      "suggested_fix_logic": "Map unrecognized categories to standard list or flag for review."
+    },
+    {
+      "column": "qty",
+      "issue": "Non-numeric or missing values",
+      "severity": "medium",
+      "business_impact": "Invalid quantity data affects inventory and order fulfillment calculations.",
+      "suggested_fix_logic": "Validate numeric values; replace or remove invalid entries."
+    }
+  ],
+  "append_upsert_suggestion": {
+    "strategy": "Upsert",
+    "details": "Use unique OrderID as key; update existing records and insert new ones to maintain data freshness."
+  },
+  "schema_drift": {
+    "detected": true,
+    "differences": [
+      {
+        "column": "OrderID",
+        "expected_type": "string",
+        "current_type": "null or missing"
+      },
+      {
+        "column": "CustomerEmail",
+        "expected_type": "string",
+        "current_type": "mixed"
+      },
+      {
+        "column": "OrderDate",
+        "expected_type": "string",
+        "current_type": "string but inconsistent format"
+      },
+      {
+        "column": "Price",
+        "expected_type": "float",
+        "current_type": "string"
+      },
+      {
+        "column": "qty",
+        "expected_type": "integer",
+        "current_type": "string"
+      }
+    ],
+    "analysis": "Schema drift indicates inconsistent data types and missing fields compared to the expected schema, likely due to data ingestion issues or schema evolution."
+  },
+  "dynamic_validation_rules": [
+    {
+      "column": "OrderID",
+      "rule_type": "format_check",
+      "inferred_from_samples": [
+        "ORD1004",
+        "ORD1005"
+      ],
+      "rule_details": "Samples follow the pattern 'ORD' followed by 4 digits. Likely a string format: ^ORD\\d{4}$"
+    },
+    {
+      "column": "cust",
+      "rule_type": "format_check",
+      "inferred_from_samples": [
+        "CUST003",
+        "CUST004"
+      ],
+      "rule_details": "Samples follow the pattern 'CUST' followed by 3 digits. Likely a string format: ^CUST\\d{3}$"
+    },
+    {
+      "column": "OrderDate",
+      "rule_type": "format_check",
+      "inferred_from_samples": [
+        "2025-10-24",
+        "2025-10-25"
+      ],
+      "rule_details": "Samples follow the date format 'YYYY-MM-DD'. Regex pattern: ^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    {
+      "column": "qty",
+      "rule_type": "format_check",
+      "inferred_from_samples": [
+        "10",
+        "5"
+      ],
+      "rule_details": "Samples are numeric strings representing integers. Should be validated as integers with regex: ^\\d+$"
+    },
+    {
+      "column": "Price",
+      "rule_type": "range_check",
+      "inferred_from_samples": [
+        25.0,
+        12.5
+      ],
+      "rule_details": "Samples are positive float values. Likely should be > 0, with a possible upper limit based on business context."
+    },
+    {
+      "column": "ShippingMethod",
+      "rule_type": "enum_check",
+      "inferred_from_samples": [
+        "Standard",
+        "Express",
+        "Priority"
+      ],
+      "rule_details": "Samples indicate categorical values. Allowed list: ['Standard', 'Express', 'Priority']"
+    },
+    {
+      "column": "CustomerEmail",
+      "rule_type": "format_check",
+      "inferred_from_samples": [
+        "user@example.com",
+        "bad-email"
+      ],
+      "rule_details": "Samples include valid and invalid email formats. Valid emails match regex: ^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+    }
+  ],
+  "root_cause_analysis": {
+    "schema_drift": "Likely caused by inconsistent data ingestion processes, missing schema enforcement, or evolving data sources.",
+    "data_issues": "Data entry errors, improper parsing, or lack of validation during data collection."
+  },
+  "overall_analysis": "The dataset exhibits significant schema inconsistencies and critical data quality issues, notably missing primary keys and invalid contact information. These issues compromise data integrity, reporting accuracy, and operational decision-making. Immediate remediation focusing on key fields and validation rules is essential to restore data reliability."
+}
