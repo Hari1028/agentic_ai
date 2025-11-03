@@ -61,7 +61,7 @@ def extract_schema_from_df(df: pd.DataFrame, file_name: str, sheet_name: Optiona
             sample_values = df[col].dropna().unique().tolist()
             # Ensure samples are JSON serializable (convert timestamps/dates to strings)
             sample_values = [str(s) if isinstance(s, (pd.Timestamp, datetime)) else s for s in sample_values]
-            sample_values = sample_values[:15]
+            sample_values = sample_values[:5]
 
             column_details[str(col)] = {
                 'inferred_type': str(df[col].dtype),
@@ -210,7 +210,14 @@ def validate_data_types(df: DataFrame, db_schema: Dict[str, Any]) -> List[Dict[s
     for db_col_name, db_col_details in db_schema.items():
         if db_col_name not in file_schema_columns:
             continue 
+        
+        column_data = df[db_col_name]
+        if isinstance(column_data, pd.DataFrame):
+            logging.warning(f"Duplicate column name found for '{db_col_name}' after mapping. "
+                            f"This sheet is likely mismatched with the target DB table. "
+                            f"Skipping type validation for this column.")
 
+            continue 
         file_dtype = str(df[db_col_name].dtype)
         db_type_base = str(db_col_details['type']).split('(')[0].upper()
         expected_pd_type_category = sql_to_pandas_map.get(db_type_base)
@@ -288,20 +295,27 @@ def run_data_quality_checks(df: DataFrame, db_schema: Dict[str, Any], engine: sq
         if db_col_name not in df.columns:
             continue # Skip missing columns
 
+        column_data = df[db_col_name]
+        if isinstance(column_data, pd.DataFrame):
+            logging.warning(f"Duplicate column name found for '{db_col_name}' (in data_quality). "
+                            f"This sheet is likely mismatched. "
+                            f"Skipping all data quality checks for this column.")
+            continue
+
         # --- 1. Null Check (based on 'nullable' constraint) ---
         if not db_col_details['nullable']:
-            null_count = int(df[db_col_name].isnull().sum())
+            null_count = int(column_data.isnull().sum())
             # Add check for empty strings treated as nulls if column type is not object/string
-            is_numeric_type = pd.api.types.is_numeric_dtype(df[db_col_name].dtype)
+            is_numeric_type = pd.api.types.is_numeric_dtype(column_data.dtype)
             empty_string_count = 0
-            if is_numeric_type or pd.api.types.is_datetime64_any_dtype(df[db_col_name].dtype):
+            if is_numeric_type or pd.api.types.is_datetime64_any_dtype(column_data.dtype):
                  # Count empty strings only if conversion to numeric/date might fail
-                 if df[db_col_name].dtype == 'object':
-                      empty_string_count = int((df[db_col_name] == '').sum())
-                      null_count += empty_string_count # Treat empty strings as nulls for non-text columns
+                if column_data.dtype == 'object':
+                    empty_string_count = int((column_data == '').sum())
+                    null_count += empty_string_count # Treat empty strings as nulls for non-text columns
 
             if null_count > 0:
-                affected_rows_sample_indices = df[df[db_col_name].isnull() | ((df[db_col_name].dtype == 'object') & (df[db_col_name] == ''))].index.tolist()[:5]
+                affected_rows_sample_indices = df[column_data.isnull() | ((column_data.dtype == 'object') & (column_data == ''))].index.tolist()[:5]
                 dq_violations.append({
                     "column": db_col_name,
                     "check": "not_null_violation",
@@ -339,7 +353,7 @@ def run_data_quality_checks(df: DataFrame, db_schema: Dict[str, Any], engine: sq
 
         if col_check_constraints:
             
-            numeric_col = pd.to_numeric(df[db_col_name], errors='coerce')
+            numeric_col = pd.to_numeric(column_data, errors='coerce')
             is_numeric = numeric_col.notna().all() 
 
             for constraint in col_check_constraints:
