@@ -51,24 +51,18 @@ except Exception as e:
 
 # --- 4. System Prompts (UPDATED) ---
 SYSTEM_PROMPT_INSIGHT = """
-You are the **LLM Insight Agent**, an expert in data validation and analysis.
-Your job is to provide context-aware, intelligent analysis.
-You do **NOT** execute any Python functions or tools.
-You will receive raw JSON data and reports.
+You are the **Principal Data Steward**, a senior expert in data governance, quality, and pipeline architecture.
+Your job is to provide authoritative, context-aware analysis to protect business operations.
 
-Your tasks are:
-1.  Perform semantic column mapping.
-2.  Analyze schema mismatches.
-3.  Assess data quality violations, assign a severity, and **provide a concise analysis of the business impact** for each violation.
-4.  **Provide a `root_cause_hypothesis`** (the likely real-world source) for each data violation and type mismatch.
-5.  **Generate a `suggested_fix_logic`** (language-agnostic pseudocode) for each data violation and type mismatch.
-6.  Suggest append/upsert strategies.
-7.  Generate dynamic validation rules.
-8.  Produce a final root-cause analysis and narrative summary.
-9.  **Generate an actionable `triage_plan`** with the top 3-5 most critical actions, ordered by priority, for a human to perform.
-10.  **Generate a final `data_quality_score`** (0-100), `data_quality_grade` (A-F), and `score_reasoning` that weights the violations by their business impact.
+You do **NOT** execute any Python functions. You only analyze.
 
-You will format your analysis in the specific JSON structure requested.
+Your tasks are to:
+1.  **Connect Disparate Issues:** Do not just list problems. Find the *pattern* between them (e.g., "The null OrderIDs, 'object' type on 'Quantity', and invalid emails all point to a single failed ETL job or a manual data entry error").
+2.  **Assess Business Risk:** For each violation, explain the *specific, real-world business impact* (e.g., "Invalid emails will break the customer notification system," "Null PKs will cause data corruption on upsert").
+3.  **Form a Root Cause Hypothesis:** Based on the evidence, provide the *most likely real-world source* of the errors. Be specific (e.g., "Manual CSV upload from Sales," "Corrupted Parquet file from data lake," "API integration bug").
+4.  **Provide Actionable, Prioritized Plans:** Give a 3-5 step plan ordered by *business criticality*.
+
+You will format your analysis *only* in the specific JSON structure requested.
 Do not chat. Provide *only* the requested JSON analysis.
 """
 
@@ -135,6 +129,7 @@ def get_llm_streaming_response(system_prompt: str, user_prompt: str, max_retries
             return full_response
         
         except openai.RateLimitError as e:
+            sleep_time = 60 * (attempt + 1)
             logging.warning(f"Rate limit hit. Retrying in 60s... ({attempt + 1}/{max_retries})")
             time.sleep(60)
             
@@ -189,7 +184,7 @@ def load_historical_schemas(table_name: str, num_history: int) -> List[Dict[str,
 # --- 8. Core Validation Logic (UPDATED) ---
 
 # --- Constants (Unchanged) ---
-FILE_PATH = "sample_input/new_orders.csv" 
+FILE_PATH = "ironclad.xlsx" 
 TABLE_NAME = None 
 DB_URL = "sqlite:///database/sample_data.db"
 
@@ -309,33 +304,81 @@ def run_validation_for_sheet(
             logging.warning(f"Could not generate dynamic rules: {e}")
             dynamic_rules = [{"error": "Failed to generate dynamic rules"}]
 
-        # --- Step 5 (Sheet): LLM Final Report Generation (UPDATED) ---
-        logging.info(f"--- [Sheet '{sheet_display_name}'] Step 4: LLM Final Report ---")
-        historical_schemas = load_historical_schemas(target_table_name, NUM_HISTORICAL_SCHEMAS_TO_LOAD)
+        logging.info(f"--- [Sheet '{sheet_display_name}'] Step 5: Assembling Violation Summary ---")
+        def _create_violation_summary(types, dq):
+            summary = {
+                "type_mismatch_summary": [
+                    {"column": v["column"], "expected": v["expected_db_type"], "found": v["found_file_type"]}
+                        for v in types
+                    ],
+                "data_quality_issue_summary": [
+                    {"column": v["column"], "check": v["check"], "count": v["count"], "severity": v.get("severity", "medium")}
+                        for v in dq
+                    ]
+            }
+            return summary
+
+        violations_summary = _create_violation_summary(type_violations, dq_violations)
+
+# --- [NEW] Step 6: Build Base Report (Python) ---
+        logging.info(f"--- [Sheet '{sheet_display_name}'] Step 6: Building Base Report ---")
         file_metadata = {"file_name": os.path.basename(file_path), "sheet_name": sheet_name, "total_rows": file_schema.get("total_rows")}
 
-        final_prompt = prompts.get_final_report_prompt(
-            file_metadata=file_metadata, schema_analysis=schema_analysis_json,
-            type_mismatches=type_violations, dq_violations=dq_violations,
-            current_file_schema=file_schema, historical_schemas=historical_schemas,
-            dynamic_rules=dynamic_rules
-        )
-        
-        sheet_report_str = get_llm_streaming_response(SYSTEM_PROMPT_INSIGHT, final_prompt)
-        if sheet_report_str is None:
-            raise ValueError("Failed to get final report from LLM.")
-            
-        try:
-            sheet_report = json.loads(sheet_report_str)
-        except json.JSONDecodeError as e:
-            logging.error(f"Failed to parse JSON from final report: {e}\nRaw response: {sheet_report_str}")
-            raise ValueError("LLM did not return valid JSON for final report.")
+        # This is our final JSON object, assembled in Python for free
+        base_report = {
+            "file_name": file_metadata.get("file_name"),
+            "sheet_name": file_metadata.get("sheet_name"),
+            "total_rows_checked": file_metadata.get("total_rows"),
+            "validated_at": datetime.now(timezone.utc).isoformat(),
 
+            # Dump the raw, detailed violation lists directly
+            "data_type_mismatch": type_violations,
+            "data_quality_issues": dq_violations,
+            "dynamic_validation_rules": dynamic_rules,
+
+            # These keys are placeholders. The LLM will fill them.
+            "validation_summary": {},
+            "data_quality_score": {},
+            "triage_plan": [],
+            "append_upsert_suggestion": {},
+            "schema_drift": {},
+            "root_cause_analysis": {},
+            "overall_analysis": {}
+        }
+
+ # --- [NEW] Step 7: LLM Final Analysis (Cheap) ---
+        logging.info(f"--- [Sheet '{sheet_display_name}'] Step 7: Calling LLM for Final Analysis ---")
+        historical_schemas = load_historical_schemas(target_table_name, NUM_HISTORICAL_SCHEMAS_TO_LOAD)
+
+# Use the NEW prompt function
+        analysis_prompt = prompts.get_analysis_prompt(
+        schema_analysis=schema_analysis_json,
+        violations_summary=violations_summary,
+        historical_schemas=historical_schemas
+        )
+
+        analysis_response_str = get_llm_streaming_response(SYSTEM_PROMPT_INSIGHT, analysis_prompt)
+        if analysis_response_str is None:
+            raise ValueError("Failed to get final analysis from LLM.")
+
+        try:
+ # This is the SMALL JSON from the LLM
+            llm_analysis_json = json.loads(analysis_response_str)
+            base_report.update(llm_analysis_json)
+
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse JSON from final analysis: {e}\nRaw response: {analysis_response_str}")
+            # If it fails, we still have the base report with raw data
+            base_report["validation_summary"] = {"status": "Error", "details": "LLM analysis parsing failed."}
+
+ # Save schema history (this is unchanged)
         if target_table_name:
             save_schema_to_history(target_table_name, file_schema)
 
-        logging.info(f"---  Sheet '{sheet_display_name}' Validation Complete ---")
+        logging.info(f"--- Sheet '{sheet_display_name}' Validation Complete ---")
 
+ # IMPORTANT: Make sure to return the base_report
+        sheet_report = base_report
     except Exception as e:
         logging.error(f"---  ERROR during validation for Sheet '{sheet_display_name}': {e} ---", exc_info=True)
         sheet_report = {
@@ -390,8 +433,18 @@ def run_multi_sheet_validation(file_path: str, db_url=DB_URL, user_provided_tabl
                     db_url=db_url, user_provided_table_name=user_provided_table_name
                 )
                 report_key = sheet_name if sheet_name is not None else "csv_data"
-                all_sheet_reports[report_key] = sheet_report
-                
+                if report_key != "csv_data":
+                    ordered_sheet_report = {}
+
+                    if "file_name" in sheet_report:
+                        ordered_sheet_report["file_name"] = sheet_report.pop("file_name")
+                    if "sheet_name" in sheet_report:
+                        ordered_sheet_report["sheet_name"] = sheet_report.pop("sheet_name")
+                    ordered_sheet_report["schema_mismatch"] = schema_analysis_json
+                    ordered_sheet_report.update(sheet_report)                    
+                    all_sheet_reports[report_key] = ordered_sheet_report
+                else:
+                    all_sheet_reports[report_key] = sheet_report
                 if not first_schema_mismatch: first_schema_mismatch = schema_analysis_json
                 if not inferred_target_table and inferred_table: inferred_target_table = inferred_table
                 
@@ -407,19 +460,19 @@ def run_multi_sheet_validation(file_path: str, db_url=DB_URL, user_provided_tabl
                 "Processed_at": datetime.now(timezone.utc).isoformat(),
                 "user_provided_target_table": user_provided_table_name,
                 "inferred_target_table": inferred_target_table,
-                "schema_mismatch": first_schema_mismatch,
                 "sheet_validation_results": all_sheet_reports
             }
         else:
-            csv_report = all_sheet_reports.get("csv_data", {})
+            csv_report_data = all_sheet_reports.get("csv_data", {})
+            schema_mismatch_data = first_schema_mismatch
             final_output = {
                 "User_file_name": base_file_name,
                 "Processed_at": datetime.now(timezone.utc).isoformat(),
                 "user_provided_target_table": user_provided_table_name,
                 "inferred_target_table": inferred_target_table,
-                "schema_mismatch": first_schema_mismatch
+                "schema_mismatch": schema_mismatch_data
             }
-            final_output.update(csv_report)
+            final_output.update(csv_report_data)
         
         logging.info("--- [Step 5: Complete Validation Report] ---")
         print("="*80)
