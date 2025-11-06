@@ -1,0 +1,9 @@
+1.git clone https://github.com/fenago/autogen-streamlit.git
+2.cd autogen-streamlit 
+3.python -m venv venv 
+4.venv\Scripts\Activate
+5.pip install -r requirements.txt
+6.pip install streamlit
+7.pip install autogen-agentchat==0.6.0 pyautogen==0.1.13
+8.streamlit run app.py
+9.
