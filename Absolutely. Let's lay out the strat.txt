@@ -1,0 +1,82 @@
+Absolutely. Let's lay out the strategic plan.
+
+We need to do this in three main phases. The first phase is all about "de-coupling" your agents from the terminal, and the next two are about building the new Streamlit interface.
+
+Phase 1: Modify Your Core Agent Definitions (The "Non-Blocking" Setup)
+The goal here is to remove every part of your code that tries to pause the script and wait for a human.
+
+1. Fix the UserProxyAgent: This is the most critical change.
+
+You must change human_input_mode from "TERMINATE" to "NEVER". This tells the agent "never try to pause and ask for input()."
+
+You must remove the is_termination_msg line (the one that checks for <3). The chat will no longer "terminate" this way; it will just naturally "end" when the agents have nothing more to say and are waiting for the human's next st.chat_input.
+
+2. Fix the Agent System Prompts:
+
+You need to edit the system_message for your UserQuestionAskerAgent and ConversationAgent.
+
+Remove all instructions that tell them to use the <3 symbol. Their job is no longer to stop the chat for the user, but simply to post their question or report as their final message in a turn.
+
+3. Fix the GroupChatManager Prompt:
+
+Edit the manager's system_message and delete the rule (your rule 4.d) that says "select the User (who is the human) whenever it gets message ending with '<3'."
+
+The manager should never select the User agent. The only way the user speaks is from the outside, through the Streamlit chat box.
+
+4. Delete the Final Line:
+
+At the very end of your script, you must delete the user_proxy.initiate_chat(...) line. This entire "blocking" call will be replaced by our new Streamlit logic.
+
+Phase 2: Set Up the Streamlit "App Shell"
+The goal here is to create the web page and, most importantly, persist your agents and chat history.
+
+1. Use st.session_state for Everything: Streamlit reruns your script from top to bottom on every interaction. To avoid losing your chat history (or recreating your 8 agents every time), you must store them in st.session_state.
+
+You'll check if "messages" not in st.session_state: to create an empty list for the chat history.
+
+You'll check if "manager" not in st.session_state: to trigger an "initialization" function.
+
+2. Create an Initialization Function:
+
+You will move all your agent and manager creation code (everything from user_proxy = ... to manager = ...) inside a new function (e.g., def setup_agents():).
+
+This function will only be called once (when "manager" isn't in st.session_state) and it will save all the created agents and the manager into st.session_state (e.g., st.session_state.manager = manager, st.session_state.user_proxy = user_proxy, etc.).
+
+3. Display the UI:
+
+You'll add st.title("Data Steward POC").
+
+You'll write a for loop that iterates over your st.session_state.messages to display the entire chat history on every rerun.
+
+At the very bottom, you'll add st.chat_input("Your turn:") to get the user's next message.
+
+Phase 3: Connect the UI to the Agents (The "Glue" Logic)
+This is the final and most important part. This is the logic that runs every time the user hits "Enter."
+
+1. Capture User Input:
+
+You'll wrap your st.chat_input in an if statement: if prompt := st.chat_input("Your turn:"):. This block will only run when the user has just sent a new message.
+
+2. Send the Message to Autogen:
+
+Inside that if block, the first thing you'll do is add the user's prompt to st.session_state.messages and display it.
+
+Then, you will "wake up" the agents by sending this prompt to the manager. You'll use the agents you saved in session state: st.session_state.user_proxy.send(prompt, recipient=st.session_state.manager).
+
+3. Let the Agents Run:
+
+This .send() function is the new "blocking" part. Streamlit will show a "Running..." spinner.
+
+Your agents will now have their entire conversation (just like your terminal log) inside this single function call.
+
+The conversation will run until the agents have posted their final message (e.g., the WorkflowPlannerAgent asking "Which table?"). Since human_input_mode is "NEVER", the chat will not hang; it will just finish its turn.
+
+4. Update and Rerun:
+
+After the .send() call is complete, you will go to the st.session_state.manager and get all the new messages from its chat history.
+
+You'll add these new agent messages to your st.session_state.messages list.
+
+Finally, you will call st.rerun() to force Streamlit to refresh the page immediately and display the new agent responses you just added.
+
+This plan completely flips the logic: instead of Autogen pulling input from a terminal, Streamlit pushes input into Autogen whenever the user provides it.
