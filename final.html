@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2-Wheeler Story Dashboard | AutoInsight</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .chart-container { position: relative; height: 260px; width: 100%; }
+        #geoMap { height: 350px; border-radius: 12px; z-index: 10; width: 100%; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        
+        /* Range Slider Styling */
+        input[type=range] {
+            -webkit-appearance: none; width: 100%; background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #2563eb; cursor: pointer; margin-top: -6px; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px; cursor: pointer; background: #e2e8f0; border-radius: 2px;
+        }
+        
+        /* Tab Styles */
+        .nav-tab.active { border-bottom: 2px solid #2563eb; color: #2563eb; font-weight: 600; }
+        .tab-content { display: none; animation: fadeIn 0.3s ease-in-out; }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Vehicle Type Button Active State */
+        .v-type-btn.active { background-color: white; color: #2563eb; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); font-weight: 600; }
+    </style>
+</head>
+<body class="bg-[#f8fafc] h-screen overflow-hidden flex flex-col">
+
+    <!-- 1. TOP BAR: THE CONTEXT (Time & Location) -->
+    <header class="bg-white border-b border-slate-200 z-30 shadow-sm flex-shrink-0">
+        <div class="px-6 py-3 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <!-- Brand -->
+            <div class="flex items-center gap-2 min-w-[200px]">
+                <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
+                    <i class="ph-fill ph-moped text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-sm font-bold text-slate-800 leading-tight">AutoInsight</h1>
+                    <p class="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">OEM Decision Board</p>
+                </div>
+            </div>
+
+            <!-- STORY PHASE 1: CONTEXT FILTERS -->
+            <div class="flex-1 flex flex-wrap lg:flex-nowrap items-center gap-4 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                
+                <!-- Time Period -->
+                <div class="flex items-center gap-2 px-2 border-r border-slate-200 min-w-max">
+                    <div class="text-slate-400"><i class="ph-bold ph-calendar-blank"></i></div>
+                    <div class="flex flex-col">
+                        <label class="text-[9px] font-bold text-slate-400 uppercase">Registration Date</label>
+                        <div class="flex items-center gap-2">
+                            <input type="date" class="text-xs bg-transparent outline-none font-medium text-slate-700 w-24" value="2023-01-01" onchange="updateDashboard()">
+                            <span class="text-slate-300">-</span>
+                            <input type="date" class="text-xs bg-transparent outline-none font-medium text-slate-700 w-24" value="2023-12-31" onchange="updateDashboard()">
+                        </div>
+                    </div>
+                    <!-- Quick Selects -->
+                    <div class="flex gap-1 ml-2">
+                        <button onclick="updateDashboard()" class="text-[9px] px-2 py-1 bg-white border border-slate-200 rounded hover:bg-blue-50 hover:text-blue-600 transition">YTD</button>
+                        <button onclick="updateDashboard()" class="text-[9px] px-2 py-1 bg-white border border-slate-200 rounded hover:bg-blue-50 hover:text-blue-600 transition">QTD</button>
+                    </div>
+                </div>
+
+                <!-- Location Hierarchy (Drill Down) -->
+                <div class="flex items-center gap-2 px-2 w-full">
+                    <div class="text-slate-400"><i class="ph-bold ph-map-pin"></i></div>
+                    
+                    <!-- Level 1: State -->
+                    <div class="flex flex-col w-full max-w-[120px]">
+                        <label class="text-[9px] font-bold text-slate-400 uppercase">State</label>
+                        <select id="filterState" onchange="handleStateChange()" class="text-xs bg-transparent outline-none font-bold text-slate-700 w-full cursor-pointer hover:text-blue-600">
+                            <option value="all">All India</option>
+                            <option value="MH">Maharashtra</option>
+                            <option value="KA">Karnataka</option>
+                            <option value="GJ">Gujarat</option>
+                            <option value="TN">Tamil Nadu</option>
+                            <option value="UP">Uttar Pradesh</option>
+                        </select>
+                    </div>
+                    <i class="ph ph-caret-right text-slate-300 text-xs"></i>
+                    
+                    <!-- Level 2: RTO -->
+                    <div class="flex flex-col w-full max-w-[120px]">
+                        <label class="text-[9px] font-bold text-slate-400 uppercase">RTO</label>
+                        <select id="filterRto" disabled onchange="updateDashboard()" class="text-xs bg-transparent outline-none font-medium text-slate-600 w-full disabled:text-slate-300 cursor-pointer">
+                            <option>Select RTO...</option>
+                        </select>
+                    </div>
+                    <i class="ph ph-caret-right text-slate-300 text-xs"></i>
+
+                    <!-- Level 3: Pincode -->
+                    <div class="flex flex-col w-full max-w-[100px]">
+                        <label class="text-[9px] font-bold text-slate-400 uppercase">Pincode</label>
+                        <select id="filterPin" disabled onchange="updateDashboard()" class="text-xs bg-transparent outline-none font-medium text-slate-600 w-full disabled:text-slate-300 cursor-pointer">
+                            <option>Select Pin...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin Profile -->
+            <div class="hidden lg:flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">JD</div>
+            </div>
+        </div>
+        
+        <!-- Navigation Tabs -->
+        <div class="px-6 flex gap-6 border-t border-slate-100 text-sm">
+            <button onclick="switchTab('performance', this)" class="nav-tab active py-2 px-1 hover:text-blue-600 transition">Performance View</button>
+            <button onclick="switchTab('geospatial', this)" class="nav-tab py-2 px-1 hover:text-blue-600 transition text-slate-500">Geospatial Analysis</button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        
+        <!-- 2. LEFT SIDEBAR: THE CONTROLS (Subject & Details) -->
+        <aside class="w-72 bg-white border-r border-slate-200 overflow-y-auto custom-scrollbar flex-shrink-0 z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+            <div class="p-4 space-y-6">
+                
+                <!-- SECTION: VEHICLE PROFILE (Drill Down) -->
+                <div>
+                    <h3 class="text-xs font-bold text-slate-800 uppercase mb-3 flex items-center gap-1.5">
+                        <i class="ph-fill ph-motorcycle text-blue-600"></i> Vehicle Profile
+                    </h3>
+                    
+                    <div class="space-y-3">
+                        <!-- Make -->
+                        <div class="relative">
+                            <label class="text-[10px] text-slate-400 font-semibold absolute -top-1.5 left-2 bg-white px-1">Make</label>
+                            <select id="filterMake" onchange="handleMakeChange()" class="w-full text-xs border border-slate-200 rounded-md py-2.5 px-3 outline-none focus:border-blue-500 bg-white">
+                                <option value="all">All Makes</option>
+                                <option value="Hero">Hero MotoCorp</option>
+                                <option value="Honda">Honda 2W</option>
+                                <option value="TVS">TVS Motors</option>
+                                <option value="Bajaj">Bajaj Auto</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Model -->
+                        <div class="relative">
+                            <label class="text-[10px] text-slate-400 font-semibold absolute -top-1.5 left-2 bg-white px-1">Model</label>
+                            <select id="filterModel" disabled onchange="updateDashboard()" class="w-full text-xs border border-slate-200 rounded-md py-2.5 px-3 outline-none focus:border-blue-500 bg-slate-50 disabled:opacity-60">
+                                <option>Select Make First...</option>
+                            </select>
+                        </div>
+
+                        <!-- Variant -->
+                        <div class="relative">
+                            <label class="text-[10px] text-slate-400 font-semibold absolute -top-1.5 left-2 bg-white px-1">Variant</label>
+                            <select id="filterVariant" disabled onchange="updateDashboard()" class="w-full text-xs border border-slate-200 rounded-md py-2.5 px-3 outline-none focus:border-blue-500 bg-slate-50 disabled:opacity-60">
+                                <option>Select Model First...</option>
+                            </select>
+                        </div>
+
+                        <!-- Vehicle Type Segmented Control -->
+                        <div>
+                            <label class="text-[10px] text-slate-400 font-semibold block mb-1.5">Vehicle Type</label>
+                            <div class="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-md">
+                                <button onclick="setVehicleType('All', this)" class="v-type-btn active text-[10px] py-1.5 rounded text-slate-500 hover:text-slate-700 transition">All</button>
+                                <button onclick="setVehicleType('Scooter', this)" class="v-type-btn text-[10px] py-1.5 rounded text-slate-500 hover:text-slate-700 transition">Scooter</button>
+                                <button onclick="setVehicleType('Bike', this)" class="v-type-btn text-[10px] py-1.5 rounded text-slate-500 hover:text-slate-700 transition">Bike</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="border-slate-100">
+
+                <!-- SECTION: COLOUR (Dropdown) -->
+                <div>
+                    <h3 class="text-xs font-bold text-slate-800 uppercase mb-3 flex items-center gap-1.5">
+                        <i class="ph-fill ph-palette text-pink-500"></i> Colour
+                    </h3>
+                    <div class="relative">
+                        <select id="filterColor" onchange="updateDashboard()" class="w-full text-xs border border-slate-200 rounded-md py-2 px-3 outline-none focus:border-blue-500 bg-white">
+                            <option value="all">All Colours</option>
+                            <option value="Black">Black</option>
+                            <option value="Red">Red</option>
+                            <option value="Blue">Blue</option>
+                            <option value="White">White</option>
+                            <option value="Grey">Grey</option>
+                            <option value="Silver">Silver</option>
+                            <option value="Green">Green</option>
+                            <option value="Yellow">Yellow</option>
+                            <option value="Orange">Orange</option>
+                            <option value="Matte">Matte Finish</option>
+                        </select>
+                    </div>
+                </div>
+
+                <hr class="border-slate-100">
+
+                <!-- SECTION: FINANCIALS (Slider) -->
+                <div>
+                    <h3 class="text-xs font-bold text-slate-800 uppercase mb-3 flex items-center gap-1.5">
+                        <i class="ph-fill ph-currency-inr text-green-600"></i> Sales Amount
+                    </h3>
+                    <div class="px-1">
+                        <div class="flex justify-between text-[10px] text-slate-500 font-medium mb-1">
+                            <span>₹50k</span>
+                            <span id="priceLabel">₹1.2L</span>
+                            <span>₹2.5L</span>
+                        </div>
+                        <input type="range" min="50000" max="250000" step="5000" value="120000" oninput="document.getElementById('priceLabel').innerText = '₹' + (this.value/1000).toFixed(0) + 'k'; updateDashboard()">
+                    </div>
+                </div>
+
+                <hr class="border-slate-100">
+
+                <!-- SECTION: TECHNICAL SPECS -->
+                <div class="pb-10">
+                    <h3 class="text-xs font-bold text-slate-800 uppercase mb-3 flex items-center gap-1.5">
+                        <i class="ph-fill ph-engine text-orange-500"></i> Tech Specs
+                    </h3>
+                    
+                    <!-- Fuel (Clean Text Boxes) -->
+                    <div class="mb-4">
+                        <label class="text-[10px] text-slate-400 font-semibold block mb-1.5">Fuel Type</label>
+                        <div class="flex gap-2">
+                            <label class="flex-1 cursor-pointer border border-slate-200 rounded-md px-3 py-2 flex items-center justify-center gap-2 hover:bg-blue-50 hover:border-blue-300 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500 has-[:checked]:text-blue-700 transition text-xs font-medium text-slate-600">
+                                <input type="checkbox" class="hidden" checked onchange="updateDashboard()">
+                                Petrol
+                            </label>
+                            <label class="flex-1 cursor-pointer border border-slate-200 rounded-md px-3 py-2 flex items-center justify-center gap-2 hover:bg-blue-50 hover:border-blue-300 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500 has-[:checked]:text-blue-700 transition text-xs font-medium text-slate-600">
+                                <input type="checkbox" class="hidden" onchange="updateDashboard()">
+                                EV
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Transmission (Clean Text Boxes) -->
+                    <div class="mb-4">
+                        <label class="text-[10px] text-slate-400 font-semibold block mb-1.5">Transmission</label>
+                        <div class="space-y-2">
+                             <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked class="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 border-gray-300" onchange="updateDashboard()">
+                                <span class="text-xs text-slate-600">Manual</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" class="w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 border-gray-300" onchange="updateDashboard()">
+                                <span class="text-xs text-slate-600">Automatic (CVT)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Cubic Capacity Slider -->
+                    <div class="mb-4">
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-[10px] text-slate-400 font-semibold">Cubic Capacity</label>
+                            <span id="ccLabel" class="text-[10px] font-bold text-blue-600">100 - 500cc</span>
+                        </div>
+                        <input type="range" min="100" max="1000" step="50" value="500" oninput="document.getElementById('ccLabel').innerText = '100 - ' + this.value + 'cc'; updateDashboard()">
+                    </div>
+
+                    <!-- Gross Weight Slider -->
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-[10px] text-slate-400 font-semibold">Gross Weight</label>
+                            <span id="wtLabel" class="text-[10px] font-bold text-blue-600">Max 200kg</span>
+                        </div>
+                        <input type="range" min="80" max="400" step="10" value="200" oninput="document.getElementById('wtLabel').innerText = 'Max ' + this.value + 'kg'; updateDashboard()">
+                    </div>
+
+                </div>
+            </div>
+        </aside>
+
+        <!-- 3. CENTER CANVAS: THE VISUALS -->
+        <main class="flex-1 bg-slate-50/50 overflow-y-auto custom-scrollbar p-6 lg:p-8">
+            
+            <!-- TAB 1: PERFORMANCE CONTENT -->
+            <div id="tab-performance" class="tab-content active">
+                
+                <!-- KPI SECTION (UPDATED FOR OEM DECISIONS) -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 mt-2">
+                    <!-- KPI 1: MoM Growth -->
+                    <div class="bg-white p-6 rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-slate-100 group hover:border-blue-200 transition-all duration-300">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">MoM Growth</p>
+                                <h3 id="kpiGrowthVal" class="text-3xl font-bold text-slate-800 mt-2 tracking-tight">+8.2%</h3>
+                                <p class="text-[11px] text-green-600 font-medium mt-2 flex items-center bg-green-50 w-max px-2 py-0.5 rounded-full"><i class="ph-bold ph-trend-up mr-1"></i> vs last month</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- KPI 2: Vehicle Mix -->
+                    <div class="bg-white p-6 rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-slate-100 group hover:border-green-200 transition-all duration-300">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Vehicle Mix</p>
+                                <h3 id="kpiMixVal" class="text-lg font-bold text-slate-800 mt-3 tracking-tight">Scooter 62% | Bike 38%</h3>
+                                <p class="text-[11px] text-slate-400 font-medium mt-2">Registration Split</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- KPI 3: EV Share -->
+                    <div class="bg-white p-6 rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-slate-100 group hover:border-amber-200 transition-all duration-300">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">EV Penetration</p>
+                                <h3 id="kpiEvVal" class="text-3xl font-bold text-amber-600 mt-2 tracking-tight">12.4%</h3>
+                                <p class="text-[11px] text-slate-400 font-medium mt-2">of total registrations</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GRAPHS GRID (Performance) -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 mb-8">
+                    <!-- Graph 1 -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                        <div class="flex justify-between items-center mb-6">
+                            <h4 class="text-sm font-bold text-slate-700 flex items-center"><span class="w-2 h-2 bg-blue-500 rounded-full mr-2"></span> Monthly Registration Trend</h4>
+                            <button class="text-slate-400 hover:text-blue-600"><i class="ph ph-dots-three text-xl"></i></button>
+                        </div>
+                        <div class="chart-container"><canvas id="lineChart"></canvas></div>
+                    </div>
+                    <!-- Graph 2 -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                        <div class="flex justify-between items-center mb-6">
+                            <h4 class="text-sm font-bold text-slate-700 flex items-center"><span class="w-2 h-2 bg-indigo-500 rounded-full mr-2"></span> State-wise Penetration</h4>
+                            <button class="text-slate-400 hover:text-blue-600"><i class="ph ph-dots-three text-xl"></i></button>
+                        </div>
+                        <div class="chart-container"><canvas id="barChart"></canvas></div>
+                    </div>
+                    <!-- Graph 3 (UPDATED: FUEL TREND) -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                        <div class="flex justify-between items-center mb-6">
+                            <h4 class="text-sm font-bold text-slate-700 flex items-center"><span class="w-2 h-2 bg-emerald-500 rounded-full mr-2"></span> Fuel Shift Trend (Petrol vs EV)</h4>
+                            <button class="text-slate-400 hover:text-blue-600"><i class="ph ph-dots-three text-xl"></i></button>
+                        </div>
+                        <div class="chart-container"><canvas id="fuelTrendChart"></canvas></div>
+                    </div>
+                    <!-- Graph 4 (CHANGED TO DONUT) -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                        <div class="flex justify-between items-center mb-6">
+                            <h4 class="text-sm font-bold text-slate-700 flex items-center"><span class="w-2 h-2 bg-red-500 rounded-full mr-2"></span> Top Selling Models</h4>
+                            <button class="text-slate-400 hover:text-blue-600"><i class="ph ph-dots-three text-xl"></i></button>
+                        </div>
+                        <div class="chart-container relative">
+                            <canvas id="modelChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <!-- NEW GRAPH 5: LOSING MODEL TRACKER (Full width bottom) -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 col-span-1 lg:col-span-2">
+                        <div class="flex justify-between items-center mb-6">
+                            <h4 class="text-sm font-bold text-slate-700 flex items-center"><span class="w-2 h-2 bg-blue-600 rounded-full mr-2"></span> Declining Models</h4>
+                            <button class="text-slate-400 hover:text-blue-600"><i class="ph ph-dots-three text-xl"></i></button>
+                        </div>
+                        <div class="chart-container"><canvas id="decliningChart"></canvas></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: GEOSPATIAL CONTENT -->
+            <div id="tab-geospatial" class="tab-content">
+                <!-- GEOSPATIAL KPIs -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden">
+                        <div class="absolute right-0 top-0 h-full w-1 bg-green-500"></div>
+                        <p class="text-xs font-semibold text-slate-400 uppercase">Top Performing Zone</p>
+                        <h3 class="text-3xl font-bold text-slate-800 mt-2">South <span class="text-lg font-medium text-green-500">(38%)</span></h3>
+                        <p class="text-[10px] text-slate-400 mt-2">Driven by Bangalore & Chennai</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden">
+                         <div class="absolute right-0 top-0 h-full w-1 bg-indigo-500"></div>
+                        <p class="text-xs font-semibold text-slate-400 uppercase">Highest Growth State</p>
+                        <h3 class="text-3xl font-bold text-indigo-600 mt-2">Maharashtra</h3>
+                        <p class="text-[10px] text-slate-400 mt-2">+12.4% MoM (Scooters)</p>
+                    </div>
+                    <!-- CHANGED: Placeholder for KPI 3 -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative overflow-hidden">
+                         <div class="absolute right-0 top-0 h-full w-1 bg-slate-500"></div>
+                        <p class="text-xs font-semibold text-slate-400 uppercase">Pending KPI</p>
+                        <h3 class="text-3xl font-bold text-slate-300 mt-2">--</h3>
+                        <p class="text-[10px] text-slate-400 mt-2">To be defined</p>
+                    </div>
+                </div>
+
+                <!-- GEOSPATIAL GRAPHS -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                    <!-- Graph 1: Bubble Map -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+                        <div class="flex justify-between items-center mb-4">
+                            <h4 class="text-sm font-bold text-slate-700 flex items-center"><span class="w-2 h-2 bg-blue-500 rounded-full mr-2"></span> 2W Sales Hotspots</h4>
+                            <div class="flex gap-2">
+                                <span class="text-[10px] bg-slate-100 px-2 py-1 rounded"></span>
+                            </div>
+                        </div>
+                        <div id="geoMap" class="w-full"></div>
+                    </div>
+                    
+                    <!-- Graph 2: Regional Market Share (Updated Color) -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                        <div class="flex justify-between items-center mb-6">
+                            <h4 class="text-sm font-bold text-slate-700 mb-6 flex items-center"><span class="w-2 h-2 bg-purple-500 rounded-full mr-2"></span> Regional Market Share (Zone Strength)</h4>
+                            <button class="text-slate-400 hover:text-blue-600"><i class="ph ph-dots-three text-xl"></i></button>
+                        </div>
+                        <div class="chart-container"><canvas id="regionShareChart"></canvas></div>
+                    </div>
+
+                    <!-- Graph 3: High-Growth RTOs (REPLACED Districts) -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                        <div class="flex justify-between items-center mb-6">
+                            <h4 class="text-sm font-bold text-slate-700 mb-6 flex items-center"><span class="w-2 h-2 bg-orange-500 rounded-full mr-2"></span> High-Growth RTOs (MoM)</h4>
+                            <button class="text-slate-400 hover:text-blue-600"><i class="ph ph-dots-three text-xl"></i></button>
+                        </div>
+                        <div class="chart-container"><canvas id="districtChart"></canvas></div>
+                    </div>
+
+                    <!-- Graph 4: White Space Detection (Was Pending) -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                        <div class="flex justify-between items-center mb-6">
+                            <h4 class="text-sm font-bold text-slate-700 mb-6 flex items-center"><span class="w-2 h-2 bg-blue-600 rounded-full mr-2"></span> Low Sales High Opportunity Areas (State wise)</h4>
+                            <button class="text-slate-400 hover:text-blue-600"><i class="ph ph-dots-three text-xl"></i></button>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="whitespaceChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Global State
+        let currentTab = 'performance';
+        let lineChart, barChart, fuelTrendChart, modelChart, decliningChart;
+        let regionShareChart, districtChart, whiteSpaceChart;
+        let mapInstance, geoMapInstance;
+        let mapCircles = [];
+        let selectedVehicleType = 'All';
+
+        // HIERARCHY DATA (Mock)
+        const locationData = {
+            'MH': { rtos: ['MH-01 (Mumbai)', 'MH-12 (Pune)', 'MH-14 (PCMC)'], pincodes: ['400001', '411001', '411057'] },
+            'KA': { rtos: ['KA-01 (Bangalore)', 'KA-05 (Jayanagar)', 'KA-53 (KR Puram)'], pincodes: ['560001', '560066', '560037'] },
+            'GJ': { rtos: ['GJ-01 (Ahmedabad)', 'GJ-05 (Surat)'], pincodes: ['380001', '395001'] },
+            'TN': { rtos: ['TN-01 (Chennai)', 'TN-11 (Tambaram)'], pincodes: ['600001', '600002'] },
+            'UP': { rtos: ['UP-32 (Lucknow)', 'UP-16 (Noida)'], pincodes: ['226001', '201301'] }
+        };
+
+        const vehicleData = {
+            'Hero': { models: ['Splendor', 'HF Deluxe', 'Glamour'], variants: ['Plus', 'Pro', 'i3s'] },
+            'Honda': { models: ['Activa', 'Shine', 'Dio'], variants: ['6G', '125', 'DLX'] },
+            'TVS': { models: ['Jupiter', 'Apache', 'XL100'], variants: ['ZX', 'RTR 160', 'Heavy Duty'] },
+            'Bajaj': { models: ['Pulsar', 'Platina', 'Chetak'], variants: ['150', '100 ES', 'Electric'] }
+        };
+
+        // --- FILTER LOGIC (Drill Down) ---
+        function handleStateChange() {
+            const state = document.getElementById('filterState').value;
+            const rtoSel = document.getElementById('filterRto');
+            const pinSel = document.getElementById('filterPin');
+            
+            // Reset
+            rtoSel.innerHTML = '<option>Select RTO...</option>';
+            pinSel.innerHTML = '<option>Select Pin...</option>';
+            rtoSel.disabled = true;
+            pinSel.disabled = true;
+
+            if (state !== 'all' && locationData[state]) {
+                rtoSel.disabled = false;
+                locationData[state].rtos.forEach(r => {
+                    const opt = document.createElement('option');
+                    opt.value = r;
+                    opt.innerText = r;
+                    rtoSel.appendChild(opt);
+                });
+                // Enable pin for demo purposes immediately
+                pinSel.disabled = false;
+                locationData[state].pincodes.forEach(p => {
+                     const opt = document.createElement('option');
+                    opt.value = p;
+                    opt.innerText = p;
+                    pinSel.appendChild(opt);
+                });
+            }
+            updateDashboard();
+        }
+
+        function handleMakeChange() {
+            const make = document.getElementById('filterMake').value;
+            const modelSel = document.getElementById('filterModel');
+            const varSel = document.getElementById('filterVariant');
+            
+            modelSel.innerHTML = '<option>Select Model...</option>';
+            varSel.innerHTML = '<option>Select Variant...</option>';
+            modelSel.disabled = true;
+            varSel.disabled = true;
+
+            if (make !== 'all' && vehicleData[make]) {
+                modelSel.disabled = false;
+                vehicleData[make].models.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.innerText = m;
+                    modelSel.appendChild(opt);
+                });
+                // Simulate enable variant on model select logic
+                modelSel.onchange = () => {
+                     varSel.disabled = false;
+                     varSel.innerHTML = '<option>Select Variant...</option>';
+                     vehicleData[make].variants.forEach(v => {
+                        const opt = document.createElement('option');
+                        opt.value = v;
+                        opt.innerText = v;
+                        varSel.appendChild(opt);
+                    });
+                    updateDashboard();
+                };
+            }
+            updateDashboard();
+        }
+
+        function setVehicleType(type, btn) {
+            selectedVehicleType = type;
+            // Update UI
+            document.querySelectorAll('.v-type-btn').forEach(b => b.classList.remove('active'));
+            if(btn) btn.classList.add('active');
+            updateDashboard();
+        }
+
+        // --- TAB SWITCHING ---
+        function switchTab(tabName, el) {
+            currentTab = tabName;
+            
+            // Content
+            document.querySelectorAll('.tab-content').forEach(d => d.classList.remove('active'));
+            document.getElementById('tab-' + tabName).classList.add('active');
+            
+            // Nav Visuals
+            document.querySelectorAll('.nav-tab').forEach(n => n.classList.remove('active', 'text-blue-600', 'font-semibold'));
+            document.querySelectorAll('.nav-tab').forEach(n => n.classList.add('text-slate-500'));
+            if(el) {
+                el.classList.add('active');
+                el.classList.remove('text-slate-500');
+            }
+
+            // Refresh Charts
+            setTimeout(() => {
+                updateDashboard();
+                // Map resize fix
+                if (tabName === 'geospatial' && geoMapInstance) {
+                    geoMapInstance.invalidateSize();
+                }
+            }, 100);
+        }
+
+        // --- INSIGHT PANEL LOGIC (REMOVED) ---
+        // function updateInsights(...) { ... }
+
+        // --- INITIALIZATION ---
+        function initCharts() {
+            // Options with Axes
+            const commonOptions = { 
+                responsive: true, 
+                maintainAspectRatio: false, 
+                plugins: { legend: { position: 'bottom' } }, 
+                scales: { 
+                    y: { 
+                        beginAtZero: true, 
+                        grid: { color: '#f1f5f9' },
+                        title: { display: true, text: 'Volume' }
+                    }, 
+                    x: { 
+                        grid: { display: false },
+                        title: { display: true, text: 'Category' }
+                    } 
+                } 
+            };
+
+            // -- Performance Charts --
+            const ctxLine = document.getElementById('lineChart').getContext('2d');
+            lineChart = new Chart(ctxLine, { 
+                type: 'line', 
+                data: { labels: [], datasets: [] }, 
+                options: { ...commonOptions, scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' }, title: {display:true, text:'Sales Units'} }, x: { grid: { display: false }, title: {display:true, text:'Month'} } } } 
+            });
+
+            const ctxBar = document.getElementById('barChart').getContext('2d');
+            barChart = new Chart(ctxBar, { 
+                type: 'bar', 
+                data: { labels: ['KA', 'MH', 'TN', 'UP', 'TS', 'GJ', 'WB', 'DL'], datasets: [] }, 
+                options: { ...commonOptions, scales: { y: { grid: { color: '#f1f5f9' }, title: {display:true, text:'Market Penetration %'} }, x: { grid: { display: false }, title: {display:true, text:'State'} } } } 
+            });
+
+            // Fuel Trend
+            const ctxFuel = document.getElementById('fuelTrendChart').getContext('2d');
+            fuelTrendChart = new Chart(ctxFuel, { 
+                type: 'line', 
+                data: { labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], datasets: [] }, 
+                options: { 
+                    ...commonOptions, 
+                    plugins: { 
+                        tooltip: { mode: 'index', intersect: false },
+                        legend: { position: 'bottom' },
+                        filler: { propagate: false } 
+                    },
+                    scales: { 
+                        y: { 
+                            stacked: true, 
+                            min: 0, 
+                            max: 100, 
+                            title: {display:true, text:'Share %'},
+                            grid: { color: '#f1f5f9' }
+                        }, 
+                        x: { 
+                            grid: { display: false }, 
+                            title: {display:true, text:'Month'} 
+                        } 
+                    } 
+                } 
+            });
+
+            // Model Donut
+            const ctxModel = document.getElementById('modelChart').getContext('2d');
+            modelChart = new Chart(ctxModel, { 
+                type: 'doughnut', 
+                data: { labels: [], datasets: [] }, 
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    cutout: '65%',
+                    plugins: { 
+                        legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } },
+                        title: { display: false }
+                    },
+                    scales: { x: { display: false }, y: { display: false } }
+                } 
+            });
+
+            // NEW: Declining Models (Horizontal Bar)
+            const ctxDeclining = document.getElementById('decliningChart').getContext('2d');
+            decliningChart = new Chart(ctxDeclining, {
+                type: 'bar',
+                data: { labels: [], datasets: [] },
+                options: { 
+                    indexAxis: 'y',
+                    ...commonOptions,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { 
+                            title: { display: true, text: 'MoM Drop %' },
+                            grid: { display: true }
+                        },
+                        y: {
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+
+            // -- Geospatial Charts --
+            // 1. Regional Market Share
+            const ctxRegion = document.getElementById('regionShareChart').getContext('2d');
+            regionShareChart = new Chart(ctxRegion, { 
+                type: 'bar', 
+                data: { labels: ['North', 'South', 'East', 'West'], datasets: [] }, 
+                options: { ...commonOptions, scales: { y: { title: {display:true, text:'Market Share %'} }, x: { title: {display:true, text:'Zone'} } } } 
+            });
+
+            // 2. High Growth RTOs (CHANGED FROM DISTRICT)
+            const ctxDistrict = document.getElementById('districtChart').getContext('2d');
+            districtChart = new Chart(ctxDistrict, { 
+                type: 'bar', 
+                data: { labels: [], datasets: [] }, 
+                options: { 
+                    indexAxis: 'y', // Horizontal
+                    ...commonOptions, 
+                    scales: { 
+                        x: { title: {display:true, text:'MoM Growth %'} }, 
+                        y: { title: {display:true, text:'RTO'} } 
+                    } 
+                } 
+            });
+
+            // 3. White Space Detection (Simple Bar as requested)
+            const ctxWhite = document.getElementById('whitespaceChart').getContext('2d');
+            whiteSpaceChart = new Chart(ctxWhite, {
+                type: 'bar',
+                data: {
+                    labels: ['Bihar', 'Jharkhand', 'Odisha', 'Chhattisgarh'],
+                    datasets: [{
+                        label: 'Low penetration opportunity',
+                        data: [12, 18, 10, 14],
+                        backgroundColor: '#2563eb',
+                        borderRadius: 4
+                    }]
+                },
+                options: commonOptions
+            });
+
+            // -- Maps --
+            geoMapInstance = L.map('geoMap', {zoomControl: false}).setView([22.5937, 78.9629], 4);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '©OpenStreetMap' }).addTo(geoMapInstance);
+        }
+
+        // --- MASTER UPDATE LOGIC ---
+        function updateDashboard() {
+            // 1. Gather Filter Values
+            const make = document.getElementById('filterMake').value;
+            const state = document.getElementById('filterState').value;
+            const color = document.getElementById('filterColor').value;
+            
+            // 2. Determine "Seed" for variance
+            let seed = 1.0;
+            if (make !== 'all') seed *= 1.2;
+            if (state !== 'all') seed *= 0.8;
+            if (color !== 'all') seed *= 0.9;
+            
+            // Adjust based on Vehicle Type
+            if (selectedVehicleType === 'Scooter') seed *= 0.6; // Scooters approx 60% of market
+            if (selectedVehicleType === 'Bike') seed *= 0.4;
+
+            // 3. Update Insight Panel (REMOVED)
+            // updateInsights(seed, make, state);
+
+            // 4. Update KPIs (UPDATED)
+            // Growth
+            const growth = (8.2 * seed).toFixed(1);
+            document.getElementById('kpiGrowthVal').innerText = (growth > 0 ? '+' : '') + growth + '%';
+            
+            // Mix
+            const scooterShare = Math.min(100, Math.max(0, (62 * seed).toFixed(0)));
+            document.getElementById('kpiMixVal').innerText = `Scooter ${scooterShare}% | Bike ${100-scooterShare}%`;
+            
+            // EV
+            document.getElementById('kpiEvVal').innerText = (12.4 * seed).toFixed(1) + '%';
+
+
+            // 5. Update Line Chart
+            const baseTrend = [10200, 11500, 11000, 12800, 12200, 13500, 14200, 13800, 16500, 24800, 22600, 18500];
+            if (lineChart) {
+                lineChart.data.labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                lineChart.data.datasets = [{
+                    label: make === 'all' ? 'All Sales' : make,
+                    data: baseTrend.map(v => Math.floor(v * seed)),
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }];
+                lineChart.update();
+            }
+
+            // 6. Update Bar Chart
+            if (barChart) {
+                const states = ['KA', 'MH', 'TN', 'UP', 'TS', 'GJ', 'WB', 'DL'];
+                const baseStateData = [18.2, 12.5, 9.8, 6.4, 4.2, 3.1, 2.5, 1.2]; // Matching states
+                
+                // Color Logic
+                const bgColors = states.map(s => {
+                    if (state === 'all') return '#2563eb'; // Default Blue
+                    return s === state ? '#2563eb' : '#e2e8f0'; // Highlight Selected, Grey others
+                });
+
+                barChart.data.datasets = [{
+                    label: 'Market Share %',
+                    data: baseStateData.map(v => (v * seed).toFixed(1)),
+                    backgroundColor: bgColors,
+                    borderRadius: 4
+                }];
+                barChart.update();
+            }
+
+            // 7. Update Fuel Shift Trend
+            if (fuelTrendChart) {
+                // Logic: EV share starts low (5%) and grows to ~20%
+                const evShare = [5, 6, 6, 7, 9, 11, 12, 14, 15, 18, 19, 21];
+                const petrolShare = evShare.map(e => 100 - e);
+                
+                fuelTrendChart.data.datasets = [
+                    {
+                        label: 'Electric (EV)',
+                        data: evShare,
+                        backgroundColor: 'rgba(16, 185, 129, 0.7)', // Green
+                        borderColor: '#10b981',
+                        borderWidth: 1,
+                        fill: true
+                    },
+                    {
+                        label: 'Petrol',
+                        data: petrolShare,
+                        backgroundColor: 'rgba(37, 99, 235, 0.7)', // Blue
+                        borderColor: '#2563eb',
+                        borderWidth: 1,
+                        fill: true
+                    }
+                ];
+                fuelTrendChart.update();
+            }
+
+            // 8. Update Model Chart
+            if (modelChart) {
+                let models = [];
+                let data = [];
+                
+                if (make === 'Hero') {
+                    models = ['Splendor Plus', 'HF Deluxe', 'Glamour', 'Passion', 'Pleasure'];
+                    data = [40, 25, 15, 12, 8];
+                } else if (make === 'Honda') {
+                    models = ['Activa 6G', 'CB Shine', 'Dio', 'Unicorn', 'Activa 125'];
+                    data = [50, 20, 10, 8, 12];
+                } else {
+                    // Generic All India Mix
+                    models = ['Activa 6G', 'Splendor Plus', 'CB Shine', 'Jupiter', 'HF Deluxe'];
+                    data = [30, 28, 15, 14, 13];
+                }
+                
+                modelChart.data.labels = models;
+                modelChart.data.datasets = [{
+                    data: data,
+                    backgroundColor: ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'], 
+                    borderWidth: 0,
+                    hoverOffset: 4
+                }];
+                modelChart.update();
+            }
+
+            // 9. NEW: Update Declining Models
+            if (decliningChart) {
+                decliningChart.data.labels = ['Activa 125', 'Pulsar 150', 'Jupiter 110', 'Splendor Pro'];
+                decliningChart.data.datasets = [{
+                    label: 'MoM Drop %',
+                    data: [-12, -9, -6, -4].map(v => v * seed),
+                    backgroundColor: '#2563eb',
+                    borderRadius: 4
+                }];
+                decliningChart.update();
+            }
+
+            // --- GEOSPATIAL TAB LOGIC ---
+            
+            // 10. Regional Market Share
+            if (regionShareChart) {
+                const zones = ['North', 'South', 'East', 'West'];
+                const myShare = [15, 30, 10, 25]; // Mock
+                
+                // Adjust based on brand
+                if (make === 'Hero') myShare[0] += 20; // Strong in North
+                if (make === 'TVS') myShare[1] += 20; // Strong in South
+                
+                regionShareChart.data.datasets = [{
+                    label: 'Market Share %',
+                    data: myShare.map(v => v * seed),
+                    backgroundColor: '#2563eb', // Updated to Blue
+                    borderRadius: 4
+                }];
+                regionShareChart.update();
+            }
+
+            // 11. District Growth (SWITCH TO RTO)
+            if (districtChart) {
+                let rtos = [];
+                let growth = [];
+
+                // Use RTO Codes instead of Districts
+                if (state === 'MH') {
+                    rtos = ['MH-12 (Pune)', 'MH-02 (Mumbai W)', 'MH-14 (PCMC)', 'MH-31 (Nagpur)', 'MH-15 (Nashik)', 'MH-04 (Thane)', 'MH-20 (Auran.)', 'MH-10 (Sangli)', 'MH-09 (Kolha.)', 'MH-16 (Ahmed.)'];
+                    growth = [18.5, 16.2, 14.8, 12.5, 11.2, 10.5, 9.8, 8.5, 7.2, 6.5];
+                } else if (state === 'KA') {
+                    rtos = ['KA-01 (Bgl Cent)', 'KA-53 (KR Puram)', 'KA-05 (Jayan.)', 'KA-09 (Mysore)', 'KA-25 (Hubli)', 'KA-19 (Mnglre)', 'KA-32 (Gulb.)', 'KA-03 (Indira.)', 'KA-22 (Belgm)', 'KA-17 (Dvang.)'];
+                    growth = [22.1, 15.4, 13.2, 12.1, 11.5, 9.2, 8.8, 7.5, 6.4, 5.8];
+                } else if (state === 'GJ') {
+                    rtos = ['GJ-01 (Ahmd)', 'GJ-05 (Surat)', 'GJ-06 (Vadod.)', 'GJ-03 (Rajkot)', 'GJ-04 (Bhav.)', 'GJ-10 (Jamn.)', 'GJ-11 (Junag.)', 'GJ-18 (Gand.)', 'GJ-23 (Anand)', 'GJ-02 (Mehs.)'];
+                    growth = [19.2, 17.5, 15.1, 13.8, 12.4, 10.1, 9.5, 8.2, 7.1, 6.9];
+                } else {
+                    // Generic List
+                    rtos = ['MH-12 (Pune)', 'KA-01 (Bglr)', 'DL-01 (Delhi)', 'TN-01 (Chn)', 'TS-09 (Hyd)', 'GJ-01 (Ahmd)', 'UP-32 (Lkw)', 'MH-02 (Mum)', 'KA-53 (KRP)', 'TN-11 (Tbm)'];
+                    growth = [18.5, 16.2, 14.8, 12.5, 11.2, 10.5, 9.8, 8.5, 7.2, 6.5];
+                }
+                
+                districtChart.data.labels = rtos;
+                districtChart.data.datasets = [{
+                    label: 'MoM Growth %',
+                    data: growth.map(v => (v * seed).toFixed(1)),
+                    backgroundColor: '#2563eb', // Updated to Blue as requested
+                    borderRadius: 4
+                }];
+                districtChart.update();
+            }
+            
+            // 12. White Space Detection (Static Data as requested, but reactive to update calls)
+            if (whiteSpaceChart) {
+                // Keep static for demo, but re-render helps if tab switch issues occur
+                whiteSpaceChart.update();
+            }
+
+            // 13. Map Logic
+            if (geoMapInstance) {
+                mapCircles.forEach(c => geoMapInstance.removeLayer(c));
+                mapCircles = [];
+                const cities = [
+                    { name: 'Delhi', coords: [28.61, 77.20], vol: 15000 },
+                    { name: 'Mumbai', coords: [19.07, 72.87], vol: 12000 },
+                    { name: 'Bengaluru', coords: [12.97, 77.59], vol: 14500 },
+                    { name: 'Chennai', coords: [13.08, 80.27], vol: 9000 },
+                    { name: 'Pune', coords: [18.52, 73.85], vol: 7800 }
+                ];
+                cities.forEach(city => {
+                    const circle = L.circleMarker(city.coords, {
+                        radius: Math.sqrt(city.vol * seed) * 0.1,
+                        fillColor: '#2563eb',
+                        color: '#fff',
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.6
+                    }).addTo(geoMapInstance);
+                    circle.bindPopup(`<strong>${city.name}</strong><br>Sales: ${(city.vol * seed).toFixed(0)}`);
+                    mapCircles.push(circle);
+                });
+            }
+        }
+
+        window.onload = function() {
+            initCharts();
+            updateDashboard();
+        };
+    </script>
+</body>
+</html>
